@@ -11,6 +11,7 @@ class BunnyService {
 
   Future<List<Author>> fetchAuthorsAndBooks() async {
     try {
+      // Fetch all files from the root of the storage zone
       final response = await http.get(
         Uri.parse('$storageEndpoint/$storageZoneName/'),
         headers: {
@@ -24,21 +25,59 @@ class BunnyService {
         Map<String, List<Book>> authorMap = {};
 
         for (var file in files) {
-          // Bunny.net returns IsDirectory: true for folders
-          if (file['IsDirectory'] == true) {
-            String authorName = file['ObjectName'];
-            authorMap[authorName] = await _fetchBooksForAuthor(authorName);
+          // If it's an MP3 file, parse the filename to extract author
+          if (file['IsDirectory'] == false && file['ObjectName'].toString().endsWith('.mp3')) {
+            String fileName = file['ObjectName'];
+            
+            // Logic to extract author from filename: "Author Name - Title.mp3"
+            String authorName = "အထွေထွေ"; // Default category
+            String bookTitle = fileName.replaceAll('.mp3', '');
+
+            if (fileName.contains(' - ')) {
+              List<String> parts = fileName.split(' - ');
+              authorName = parts[0].trim();
+              bookTitle = parts.sublist(1).join(' - ').replaceAll('.mp3', '').trim();
+            } else if (fileName.contains('-')) {
+              List<String> parts = fileName.split('-');
+              authorName = parts[0].trim();
+              bookTitle = parts.sublist(1).join('-').replaceAll('.mp3', '').trim();
+            }
+
+            final book = Book(
+              id: file['Guid'] ?? fileName,
+              title: bookTitle,
+              authorName: authorName,
+              audioUrl: '$pullZoneUrl/$fileName',
+              duration: (file['Length'] / (1024 * 1024)).toStringAsFixed(2) + " MB", // Using size as duration placeholder
+              imageUrl: '', 
+            );
+
+            if (!authorMap.containsKey(authorName)) {
+              authorMap[authorName] = [];
+            }
+            authorMap[authorName]!.add(book);
+          }
+          // If it's a directory, we can also treat it as an author (keeping existing logic)
+          else if (file['IsDirectory'] == true) {
+            String dirName = file['ObjectName'];
+            List<Book> booksInDir = await _fetchBooksForAuthor(dirName);
+            if (booksInDir.isNotEmpty) {
+              if (!authorMap.containsKey(dirName)) {
+                authorMap[dirName] = [];
+              }
+              authorMap[dirName]!.addAll(booksInDir);
+            }
           }
         }
 
         return authorMap.entries.map((e) => Author(
           id: e.key,
           name: e.key,
-          imageUrl: '', // You can add a default image or logic to fetch author image
+          imageUrl: '', 
           books: e.value,
         )).toList();
       } else {
-        throw Exception('Failed to load authors from Bunny.net');
+        throw Exception('Failed to load content from Bunny.net');
       }
     } catch (e) {
       print('Error fetching from Bunny.net: $e');
@@ -69,8 +108,8 @@ class BunnyService {
               title: title,
               authorName: authorName,
               audioUrl: '$pullZoneUrl/$authorName/$fileName',
-              duration: '', // Bunny API doesn't provide duration directly
-              imageUrl: '', // Optional: check for a .jpg with same name
+              duration: (file['Length'] / (1024 * 1024)).toStringAsFixed(2) + " MB",
+              imageUrl: '', 
             ));
           }
         }
